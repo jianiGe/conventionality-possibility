@@ -1,0 +1,457 @@
+---
+title: "DartmouthNorms"
+author: "JG"
+date: "2023-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = TRUE)
+require(lme4)
+require(optimx)
+library(tidyverse)
+library(lsr)
+
+library(emmeans)
+```
+
+```{r notes, include=False, eval=FALSE}
+# chunk 1: setup
+# chunk 2: notes
+# chunk 3: data cleaning for dartmouth student data
+# chunk 4: data cleaning for prolific data
+# chunk 5 poss visualization 1: bargraph for stu and gen poss judgments; scatterplot version (where each dot is a participant)
+# chunk 6 poss analysis 2: anova and post hoc for stu poss judgments - speed; event type; speed x event type
+# chunk 7 poss analysis 3: anova and post hoc for gen poss judgments - speed x event type
+# chunk 8 poss
+
+# chunk 9 poss visualization 2: between group
+
+
+
+
+#tobeadded
+#effect of class year
+#demographic
+```
+
+
+```{r DataCleaning 1 dartmouth student, echo=FALSE, warning=FALSE, eval=FALSE}
+d.stu <- read.csv("data_student.csv")
+#d.gen <- read.csv("data_prolific.csv")
+
+d.stu$correct <- as.numeric(d.stu$correct)
+# length(d.stu$correct[d.stu$correct==0])/length(d.stu$correct) #1.7% too fast
+# length(d.stu$response[d.stu$response=="timeout"]) #2768
+# exclude timeouts and too fasts
+d.stu <- d.stu[d.stu$response != "timeout",]
+d.stu <- subset(d.stu, correct == 1 | is.na(correct))
+
+d.stu$condition1 <- factor(d.stu$condition1,
+                      levels=c("improbable","impossible","normal1","normal2",
+                            "abnormal1","abnormal2","abnormal3","abnormal4",
+                            "immoral", "break"))
+d.stu$condition2 <- factor(d.stu$condition2,
+                    levels=c("scenario1","scenario2","scenario3","scenario4",
+                             "scenario5","scenario6", "break"))
+d.stu$id <- substr(d.stu$link, nchar(d.stu$link) - 3, nchar(d.stu$link))
+
+
+## POSSIBILITY DATA
+d.poss.stu <- d.stu[d.stu$condition3=="fast"|d.stu$condition3=="slow",]
+
+d.poss.stu$condition3 <- factor(d.poss.stu$condition3,
+                                levels=c("fast","slow"))
+
+# original RT distribution
+#fig0 <- ggplot(d.poss.stu[d.poss.stu$RT<=3500,], aes(x=RT, fill=condition3)) +
+#   geom_histogram(position="identity", alpha=0.3, bins = 100)
+#print(fig0)
+
+# remove responses in the 'slow' condition that are too fast
+d.poss.stu <- d.poss.stu[!(d.poss.stu$condition3 == "slow" & d.poss.stu$RT < 1750), ]
+
+# RT distribution after exclusion
+#fig1 <- ggplot(d.poss.stu[d.poss.stu$RT<=3500,], aes(x=RT, fill=condition3)) +
+#   geom_histogram(position="identity", alpha=0.3, bins = 100)
+#print(fig1)
+# length(d.poss.stu$condition3[d.poss.stu$condition3=="fast"]) #20289
+# length(d.poss.stu$condition3[d.poss.stu$condition3=="slow"]) #7995
+
+# write.csv(d.poss.stu, file = "poss_stu.csv", row.names = FALSE)
+
+
+## NORM RATING DATA
+d.norm.stu <- d.stu[d.stu$condition3=="norming",]
+d.norm.stu$response <- as.numeric(d.norm.stu$response)
+
+d.norm.stu <- d.norm.stu[, c(6,12,20:24,46,47)]
+d.norm.stu <- d.norm.stu[complete.cases(d.norm.stu), ]
+
+#write.csv(d.norm.stu, file = "norm_stu.csv", row.names = FALSE)
+
+## CONFIDENCE SELF REPORT
+d.conf.stu <- d.stu[d.stu$condition1=="break",]
+d.conf.stu <- d.conf.stu[d.conf.stu$responseType=="slider",]
+d.conf.stu <- d.conf.stu[, c(6,12,24,46,47)]
+#write.csv(d.conf.stu, file = "conf_stu.csv", row.names = FALSE)
+
+```
+
+```{r DataCleaning 2 general public, echo=FALSE, warning=FALSE, eval=FALSE}
+d.gen <- read.csv("data_prolific.csv")
+
+d.gen$correct <- as.numeric(d.gen$correct)
+# length(d.gen$correct[d.gen$correct==0])/length(d.gen$correct) #1.6% too fast
+# length(d.gen$response[d.gen$response=="timeout"]) #3146
+# exclude timeouts and too fasts
+d.gen <- d.gen[d.gen$response != "timeout",]
+d.gen <- subset(d.gen, correct == 1 | is.na(correct))
+
+d.gen$condition1 <- factor(d.stu$condition1,
+                      levels=c("improbable","impossible","normal1","normal2",
+                            "abnormal1","abnormal2","abnormal3","abnormal4",
+                            "immoral", "break"))
+d.gen$condition2 <- factor(d.stu$condition2,
+                    levels=c("scenario1","scenario2","scenario3","scenario4",
+                             "scenario5","scenario6", "break"))
+
+## POSSIBILITY DATA
+d.poss.gen <- d.gen[d.gen$condition3=="fast"|d.gen$condition3=="slow",]
+
+d.poss.gen$condition3 <- factor(d.poss.gen$condition3,
+                                levels=c("fast","slow"))
+
+# original RT distribution
+# fig2 <- ggplot(d.poss.gen[d.poss.gen$RT<=3500,], aes(x=RT, fill=condition3)) +
+#    geom_histogram(position="identity", alpha=0.3, bins = 100)
+# print(fig2)
+
+# remove responses in the 'slow' condition that are too fast
+d.poss.gen <- d.poss.gen[!(d.poss.gen$condition3 == "slow" & d.poss.gen$RT < 1750), ]
+
+# RT distribution after exclusion
+# fig3 <- ggplot(d.poss.gen[d.poss.gen$RT<=3500,], aes(x=RT, fill=condition3)) +
+#   geom_histogram(position="identity", alpha=0.3, bins = 100)
+# print(fig3)
+# length(d.poss.gen$condition3[d.poss.gen$condition3=="fast"]) #26318
+# length(d.poss.gen$condition3[d.poss.gen$condition3=="slow"]) #11108
+
+# write.csv(d.poss.gen, file = "poss_gen.csv", row.names = FALSE)
+
+
+## NORM RATING DATA
+d.norm.gen <- d.gen[d.gen$condition3=="norming",]
+d.norm.gen$response <- as.numeric(d.norm.gen$response)
+
+d.norm.gen <- d.norm.gen[, c(6,18:22,44,45)]
+d.norm.gen <- d.norm.gen[complete.cases(d.norm.gen), ]
+
+#write.csv(d.norm.gen, file = "norm_gen.csv", row.names = FALSE)
+
+
+## CONFIDENCE SELF REPORT
+d.conf.gen <- d.gen[d.gen$condition1=="break",]
+d.conf.gen <- d.conf.gen[d.conf.gen$responseType=="slider",]
+d.conf.gen <- d.conf.gen[, c(6,22,44,45)]
+#write.csv(d.conf.gen, file = "conf_gen.csv", row.names = FALSE)
+
+```
+
+```{r poss visualization 1, fig.width=11, fig.height=5, echo=FALSE}
+
+d.poss.stu <- read.csv("poss_stu.csv")
+d.poss.stu <- d.poss.stu[, c(6,12,20:24,46,47)]
+d.poss.stu <- d.poss.stu[complete.cases(d.poss.stu), ]
+
+#d.poss.stu <- d.poss.stu %>% group_by(id,condition1,condition2,condition3)%>%
+#  summarise(response=mean(response, na.rm=T),
+#            RT=mean(RT, na.rm=T))
+
+d.poss.stu$response <- factor(d.poss.stu$response, levels=c("f","j"))
+d.poss.stu$response <- 2 - as.numeric(d.poss.stu$response) #f/pos->1, j/impos->0
+
+## summary plots
+d.sum1 <- d.poss.stu %>%
+  group_by(condition1, condition3) %>%
+  summarise(mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            N = length(response),
+            se = sd / sqrt(N))
+fig0 <- ggplot(d.sum1, aes(x=condition1, y=mean, fill=condition3)) +
+  geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(size = 6))   
+print(fig0)
+
+d.sum2 <- d.poss.stu %>% #by subject
+  group_by(id, condition1, condition3) %>%
+  summarise(mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            N = length(response),
+            se = sd / sqrt(N))
+
+fig1 <- d.sum2 %>% ggplot(aes(x=condition1, y=mean, color=condition3)) +
+  #geom_violin(alpha=.6, color="black", linewidth=.1) +
+  #scale_fill_manual(values=c("#bdd7e7", "#2171b5")) +
+  geom_point(aes(group=condition3,fill=condition3), stat="identity", position=position_jitterdodge(jitter.width=.3), size=.5, alpha=.4)+
+  scale_color_manual(values=c("red", "blue")) +
+  geom_point(data=d.sum1,aes(x=condition1, y=mean, fill=condition3), position=position_dodge(.9), color="black") +
+  geom_errorbar(data=d.sum1,aes(ymin=mean-se, ymax=mean+se), width=.1, position=position_dodge(2),color="black")
+
+print(fig1)
+  
+#ggsave(fig0, file="poss_stu_bar.jpg",dpi=300, height = 5, width = 7, units = "in")
+
+
+##
+## summary plots
+d.poss.gen <- read.csv("poss_gen.csv")
+d.poss.gen <- d.poss.gen[, c(6,18:22,44,45)]
+d.poss.gen <- d.poss.gen[complete.cases(d.poss.gen), ]
+
+d.poss.gen$response <- factor(d.poss.gen$response, levels=c("f","j"))
+d.poss.gen$response <- 2 - as.numeric(d.poss.gen$response) #f/pos->1, j/impos->0
+
+d.sum3 <- d.poss.gen %>%
+  group_by(condition1, condition3) %>%
+  summarise(mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            N = length(response),
+            se = sd / sqrt(N))
+fig2 <- ggplot(d.sum3, aes(x=condition1, y=mean, fill=condition3)) +
+  geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(size = 6))   
+print(fig2)
+
+d.sum4 <- d.poss.gen %>% #by subject
+  group_by(id, condition1, condition3) %>%
+  summarise(mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            N = length(response),
+            se = sd / sqrt(N))
+
+fig3 <- d.sum4 %>% ggplot(aes(x=condition1, y=mean, fill=condition3)) +
+  #geom_violin(alpha=.6, color="black", linewidth=.1) +
+  #scale_fill_manual(values=c("#bdd7e7", "#2171b5")) +
+  geom_point(aes(group=condition3,fill=condition3), stat="identity", position=position_jitterdodge(jitter.width=.3), size=.5, alpha=.2)+
+  scale_fill_manual(values=c("#bdd7e7", "#2171b5")) +
+  geom_point(data=d.sum1,aes(x=condition1, y=mean, color=condition3), position=position_dodge(.9), color="black") +
+  geom_errorbar(data=d.sum1,aes(ymin=mean-se, ymax=mean+se), width=.2, position=position_dodge(.9),color="Black")
+
+print(fig3)
+  
+#ggsave(fig3, file="poss_gen_point.jpg",dpi=300, height = 5, width = 11, units = "in")
+
+```
+
+```{r poss analysis 2, echo=FALSE, warning=FALSE}
+d.poss.stu$response <- factor(d.poss.stu$response, levels=c("0","1"))
+
+
+lm.poss.stu.0 <- glmer(response ~ condition1 * condition3 + (1|condition2) +
+                        (1|id), data=d.poss.stu, family = "binomial",
+                      control=glmerControl(optimizer=c("optimx"),
+                                          optCtrl=list(method="nlminb")))
+#saveRDS(lm.poss.stu.0, "lm0.rda")
+
+
+lm.poss.stu.1 <- glmer(response ~ condition1 + condition3 + (1|condition2) +
+                        (1|id),data=d.poss.stu, family="binomial",
+                      control=glmerControl(optimizer=c("optimx"),
+                                          optCtrl=list(method="nlminb")))
+
+## event type x speed interaction
+poss.stu.inter <- anova(lm.poss.stu.0, lm.poss.stu.1)
+poss.stu.inter$`Pr(>Chisq)` #significant, p < .0001
+
+# pairwise comparision
+emm <- emmeans(lm.poss.stu.0, ~ condition1 * condition3)
+pairwise <- pairs(emm, adjust = "tukey")
+pairwise <- as.data.frame(pairwise)
+#significant.diff between fast and slow for:
+# abnormal2 (p=0.027)
+# abnormal4 (p<.0001)
+# immoral (p=0.038)
+# impossible (p<0.0001)
+#insigificant: abnormal1, abnormal3, improbable, normal2, normal1
+
+
+## main effect of event type
+lm.poss.stu.2 <- glmer(response ~ condition1 + (1|id) + (1|condition2), data=d.poss.stu, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+
+#e5.m0 = lmer('RTPJ ~ mental_state + (1|Subject) + (1|Item)', data=d5, control = lmerControl(optimizer = c("optimx"), optCtrl = list(method ="nlminb")), REML=FALSE )
+
+poss.stu.event <- anova(lm.poss.stu.2, lm.poss.stu.1)
+poss.stu.event$`Pr(>Chisq)` #0.001
+
+# pairwise comparision
+#emm_2 <- emmeans(lm.poss.stu.2, ~ condition1)
+#pairwise_2 <- pairs(emm_2, adjust = "tukey")
+#pairwise_2 <- as.data.frame(pairwise_2)
+
+
+## main effect of speed
+lm.poss.stu.3 <- glmer(response ~ condition3 + (1|id) + (1|condition2), data=d.poss.stu, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+poss.stu.speed <- anova(lm.poss.stu.3, lm.poss.stu.1)
+
+
+```
+
+```{r poss analysis 3, echo=FALSE, warning=FALSE}
+d.poss.gen <- read.csv("poss_gen.csv")
+d.poss.gen <- d.poss.gen[, c(6,18:22,44,45)]
+d.poss.gen <- d.poss.gen[complete.cases(d.poss.gen), ]
+
+d.poss.gen$response <- factor(d.poss.gen$response, levels=c("f","j"))
+d.poss.gen$response <- 2 - as.numeric(d.poss.gen$response) #f/pos->1, j/impos->0
+
+d.poss.gen$response <- factor(d.poss.gen$response, levels=c("0","1"))
+
+
+lm.poss.gen.0 <- glmer(response ~ condition1 * condition3 + (1|condition2) +
+                        (1|id), data=d.poss.gen, family = "binomial",
+                      control=glmerControl(optimizer=c("optimx"),
+                                          optCtrl=list(method="nlminb")))
+
+lm.poss.gen.1 <- glmer(response ~ condition1 + condition3 + (1|condition2) +
+                        (1|id),data=d.poss.gen, family="binomial",
+                      control=glmerControl(optimizer=c("optimx"),
+                                          optCtrl=list(method="nlminb")))
+
+
+## event type x speed interaction
+poss.gen.inter <- anova(lm.poss.gen.0, lm.poss.gen.1)
+poss.gen.inter$`Pr(>Chisq)` #significant, p < .0001
+
+# pairwise comparision
+emm.gen <- emmeans(lm.poss.gen.0, ~ condition1 * condition3)
+pairwise.gen <- pairs(emm.gen, adjust = "tukey")
+pairwise.gen <- as.data.frame(pairwise.gen)
+#signifcant: impossible
+#not significant: abnormal1, abnormal2, abnormal3, abnormal4, immoral, ...
+
+```
+
+
+```{r poss analysis x, fig.width=11, fig.height=5, echo=FALSE}
+d.poss.stu$group <- "dartmouth"
+d.poss.gen$group <- "prolific"
+d.poss.stu <- d.poss.stu[, -2]
+
+d.poss.full <- rbind(d.poss.stu, d.poss.gen)
+#write.csv(d.poss.full, file = "poss_full.csv", row.names = FALSE)
+
+#three way
+lm.poss.full.0 <- glmer(response ~ condition1*condition3*group + (condition1 + condition3|condition2) + (condition1 + condition3|id),
+                        data = d.poss.full, family = "binomial",
+                        control=glmerControl(optimizer = c("optimx"),
+                        optCtrl = list(method="nlminb")))
+# null
+lm.poss.full.1 <- glmer(response ~ group:condition1 + group:condition3 + condition1:condition3 + (condition1 + condition3|trialNo) + (condition1|id),
+                        data = d.poss.full, family = "binomial",
+                        control=glmerControl(optimizer = c("optimx"),
+                        optCtrl = list(method="nlminb")))
+
+poss.threeway <- anova(mb0, mb1)
+
+#poss.stu.inter <- anova(lm.poss.stu.0, lm.poss.stu.1)
+#poss.stu.inter$`Pr(>Chisq)` #significant, p < .0001
+
+# mb0 = lmer('rt ~ group*agent_state*ascription + infelicity + (agent_state + ascription|item) + (agent_state|subject)', data=df, REML=FALSE)
+# mb1 = lmer('rt ~ group:agent_state + group:ascription + agent_state:ascription + infelicity + (agent_state + ascription|item) + (agent_state|subject)', data=df, REML=FALSE)
+# grpxagntxascrpt_rt <- anova(mb0, mb1)
+
+
+
+```
+
+
+```{r poss visualization2, echo=FALSE, warning=FALSE}
+
+d.sum5 <- d.poss.full %>%
+  group_by(condition1, condition3, group) %>%
+  summarise(mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            N = length(response),
+            se = sd / sqrt(N))
+fig4 <- ggplot(d.sum5, aes(x=condition1, y=mean, fill=condition3)) +
+  geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(size = 6)) +
+  facet_wrap(~group)
+print(fig4)
+
+
+d.sum5$level <- ifelse(d.sum5$group == "dartmouth" & d.sum5$condition3 == "fast",
+                       "stu-fst", ifelse(d.sum5$group == "dartmouth" &
+                        d.sum5$condition3 == "slow", "stu-slw",
+                        ifelse(d.sum5$group == "prolific" & d.sum5$condition3 ==
+                                 "fast", "gen-fst", "gen-slw")))
+
+d.sum5 <- d.sum5[,-c(2,3)]
+
+fig4.1 <- ggplot(d.sum5, aes(x=condition1, y=mean, fill=level)) +
+  scale_fill_manual(values=c("gray20", "gray50", "gray35", "gray70")) +
+  geom_bar(position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(size = 6))
+print(fig4.1)
+
+```
+
+
+```{r poss visualization 3}
+d.poss.full$level <- ifelse(d.poss.full$group == "dartmouth" & d.poss.full$condition3 == "fast",
+                       "stu-fst", ifelse(d.poss.full$group == "dartmouth" &
+                        d.poss.full$condition3 == "slow", "stu-slw",
+                        ifelse(d.poss.full$group == "prolific" & d.poss.full$condition3 ==
+                                 "fast", "gen-fst", "gen-slw")))
+
+
+d.sum6 <- d.poss.full %>% #by trialNo/action
+  group_by(trialNo, condition1, level) %>%
+  summarise(mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            N = length(response),
+            se = sd / sqrt(N))
+d.sum7 <- d.poss.full %>%
+  group_by(condition1, level) %>%
+  summarise(mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            N = length(response),
+            se = sd / sqrt(N))
+
+fig5 <- d.sum6 %>% ggplot(aes(x=condition1, y=mean, color=level)) +
+  #geom_violin(alpha=.6, color="black", linewidth=.1) +
+  #scale_fill_manual(values=c("#bdd7e7", "#2171b5")) +
+  
+  geom_point(data=d.sum7,aes(x=condition1, y=mean, fill=level), position=position_dodge(.9), size=.8, alpha=1) +
+  geom_errorbar(data=d.sum7,aes(ymin=mean-se, ymax=mean+se, fill=level), width=.1, position=position_dodge(.9), alpha=1) +
+  
+  geom_point(aes(group=level,fill=level), stat="identity", position=position_jitterdodge(jitter.width=.1), size=.5, alpha=.3)+
+  scale_color_manual(values=c("darkorange", "darkred","darkgreen", "darkblue"))
+
+print(fig5)
+```
+
+```{r}
+d.sum8 <- d.poss.full %>% #by trialNo/action
+  group_by(id, condition1, level) %>%
+  summarise(mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            N = length(response),
+            se = sd / sqrt(N))
+
+fig6 <- d.sum8 %>% ggplot(aes(x=condition1, y=mean, color=level)) +
+  #geom_violin(alpha=.6, color="black", linewidth=.1) +
+  #scale_fill_manual(values=c("#bdd7e7", "#2171b5")) +
+  
+  geom_point(data=d.sum7,aes(x=condition1, y=mean, fill=level), position=position_dodge(.9), size=.5, alpha=1) +
+  geom_errorbar(data=d.sum7,aes(ymin=mean-se, ymax=mean+se, fill=level), width=.1, position=position_dodge(.9), alpha=1) +
+  
+  geom_point(aes(group=level,fill=level), stat="identity", position=position_jitterdodge(jitter.width=.1), size=.5, alpha=.3)+
+  scale_color_manual(values=c("darkorange", "darkred","darkgreen", "darkblue"))
+
+print(fig6)
+
+```
+
