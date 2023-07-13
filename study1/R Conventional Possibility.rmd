@@ -1,0 +1,358 @@
+---
+title: "Conventional Possibility"
+author: "Jonathan Phillips & Maeen Arslan"
+date: "November 2020"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+csl: apa.csl
+word_document: default
+---
+  
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE,dpi=300,fig.width=7)
+
+#rm(list=ls())
+
+blackGreyPalette <- c("#2C3539", "#999999") 
+library(tidyverse)
+library(lme4)
+library(lsr)
+library(knitr)
+library(grid)
+library(xtable)
+
+```
+
+## Study 1 "Norming Study"
+```{r data norming, echo=FALSE}
+d1 <- read.csv("data/study1_norming.csv",stringsAsFactors = F)
+d1p <-d1[!duplicated(d1$id),]
+```
+
+We collected a sample of `r length(unique(d1p$id))` participants ($M_{age}$ = `r round(mean(d1p$age,na.rm=T),digits=2)`; $SD_{age}$ = `r round(sd(d1p$age,na.rm=T),digits=2)`; `r table(d1p$sex)[[1]]` females) from Amazon Mechanical Turk ([www.mturk.com]( www.mturk.com)).
+
+```{r norming cleaning, echo=FALSE, message=FALSE}
+#Cleaning the dataframe
+# Selecting relevant variables
+d1 <- select(d1, target, condition1, trialNo, scenario4, subjectGroup, response, RT, id)
+d1 <- d1[d1$RT > 1000,]
+
+# Factoring responses
+d1$subjectGroup <- factor(d1$subjectGroup)
+d1$subjectGroup <- factor(c("acceptibility","morality")[d1$subjectGroup])
+
+# Correct trial number
+d1$trialNo[d1$subjectGroup=="morality"] <- d1$trialNo[d1$subjectGroup=="morality"]-128
+
+# Correct label
+d1$condition1 <- factor(d1$condition1, levels=c("flouting","immoral","impossible","ordinary"),
+                             labels=c("abnormal","immoral","impossible","ordinary"))
+
+
+```
+
+
+
+### Procedure
+
+In an online survey, participants read a series of eight scenarios, each consisting of a one to two-sentence description of a commonplace situation. For example, one scenario read: "As you enter a museum, the security guard informs you that you must leave your backpack at the coat check." Associated with each scenario was a list of 16 actions, coded as ordinary ("admire your favorite painting"), impossible ("transform into a very large seal"), abnormal ("search your backpack for a snack"), or immoral ("rip a painting into small pieces"). Ordinary actions were those that would conventionally be considered typical in the
+scenario at hand. Impossible actions were those that would violate the physical laws of space and time. Abnormal actions were those that would violate a context-specific amoral rule or social norm. Immoral actions were those that would be considered overtly wrong: for example, stealing, killing, or destructive behaviors. 
+
+In total, there were eight scenarios and 128 actions, with 16 actions associated with each scenario. In each scenario-specific grouping of actions, four were ordinary, four were impossible,four were abnormal, and four were immoral. Subjects were asked to rate each of the 128 actions on a scale of 1 to 5, in terms of social acceptibility or moral permissibility. For example, a subject might be asked, "Is it socially acceptable for you to . rip a painting into small pieces?" or "Is it morally permissible for you to . rip a painting into small pieces?" Subjects were randomly assigned to the social acceptibility condition or the moral permissibility condition. The study was conducted using Testable. Trials for which the response time was too fast, trials that timed out, and trials with not applicable responses were excluded from the analyses. The final dataset consisted of 4716 trials, with 2634 social acceptibility ratings and 2082 moral permissibility ratings. 
+
+```{r norming analysis, echo=FALSE, message=FALSE}
+#Analyzing Data
+
+d.means <- d1 %>% filter(response!=6) %>%             #excluding NAs 
+  group_by(condition1,trialNo,subjectGroup) %>%
+  summarize(mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            N = length(response),
+            se = sd / sqrt(N)
+  ) %>%
+  pivot_wider(names_from=subjectGroup, values_from = c(mean,sd,N,se))
+
+#write.csv(d.means,file="normingmeans3.csv", row.names=F)
+
+## Summarized dataframe + bargraph
+
+d.means2 <- d1 %>% filter(response!=6) %>% 
+  group_by(condition1,subjectGroup) %>%
+  summarize(N = length(response),
+            mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T) ,
+            se = sd / sqrt(N)
+  ) 
+
+
+d.means2$subjectGroup <- factor(d.means2$subjectGroup, labels = c("acceptibility","morality")) 
+  ## Dataframe with morality and acceptibility on different lines
+
+d.means4 <- d1 %>% filter(response!=6) %>% 
+  group_by(condition1,subjectGroup, trialNo) %>%
+  summarize(N = length(response),
+            mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            se = sd / sqrt(N)
+  ) 
+
+## Dataframe with morality and acceptibility on different lines, grouped by participant id
+
+d.means3 <- d1 %>% filter(response!=6) %>% 
+  group_by(condition1,subjectGroup,trialNo,id) %>%
+  summarize(N = length(response),
+            mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            se = sd / sqrt(N)
+  )
+
+#write.csv(d.means3,file="normingmeans4.csv", row.names=F)
+
+```
+
+
+```{r norming test, echo=FALSE, message=FALSE}
+#T Tests
+## Establishing the validity of the a priori categories
+# Abnormal events are more unacceptable and more immoral than ordinary events (p<2.2e-16) and impossible events (p=.014)
+acc_ab_or.t <- t.test(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"],
+       d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="acceptibility"])
+mor_ab_or.t <- t.test(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"],
+       d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="acceptibility"])
+acc_imm_or.t <- t.test(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="acceptibility"],
+       d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="acceptibility"])
+acc_imm_ab.t <- t.test(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="acceptibility"],
+       d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"])
+mor_imm_ab.t <- t.test(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="morality"],
+       d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="morality"])
+mor_imm_or.t <- t.test(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="morality"],
+       d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="morality"])
+mor_acc_imm.t <- t.test(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="morality"],
+        d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="acceptibility"])
+mor_acc_ab.t <- t.test(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"],
+        d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="morality"])
+
+```
+### Results
+A two-sample t-test confirmed the validity of the a priori classifications of actions as ordinary, immoral, abnormal, or impossible. The abnormal events were regarded as socially unacceptable ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"]), digits=2)`) more frequently than the ordinary events ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="acceptibility"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="acceptibility"]), digits=2)`), $t$(`r round(acc_ab_or.t$parameter, digits=2)`) = `r round(acc_ab_or.t$statistic, digits=2)`, $p$ < `r max(acc_ab_or.t$p.value, .001)`
+
+Abnormal events were also regarded as immoral ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="morality"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="morality"]), digits=2)`)  more frequently than the ordinary events ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="morality"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="morality"]), digits=2)`), $t$(`r round(mor_ab_or.t$parameter, digits=2)`) = `r round(acc_ab_or.t$statistic, digits=2)`, $p$ < `r max(mor_ab_or.t$p.value, .001)`.
+
+Immoral events were regarded as socially unacceptable ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="acceptibility"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="acceptibility"]), digits=2)`) more
+frequently than both the abnormal events  ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"]), digits=2)`), $t$(`r round(acc_imm_ab.t$parameter, digits=2)`) = `r round(acc_imm_ab.t$statistic, digits=2)`, $p$ < `r max(acc_imm_ab.t$p.value, .001)`, and
+the ordinary events ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="acceptibility"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="acceptibility"]), digits=2)`), $t$(`r round(acc_imm_or.t$parameter, digits=2)`) = `r round(acc_imm_or.t$statistic, digits=2)`, $p$ < `r max(acc_imm_or.t$p.value, .001)`.
+
+Immoral events were also
+regarded as immoral ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="morality"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="morality"]), digits=2)`) more frequently than the abnormal events  ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="morality"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="morality"]), digits=2)`), $t$(`r round(mor_imm_ab.t$parameter, digits=2)`) = `r round(mor_imm_ab.t$statistic, digits=2)`,$p$ < `r max(mor_imm_ab.t$p.value, .001)`, and the ordinary events ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="morality"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="ordinary" & d.means3$subjectGroup=="morality"]), digits=2)`), $t$(`r round(mor_imm_or.t$parameter, digits=2)`) = `r round(mor_imm_or.t$statistic, digits=2)`, $p$ < `r max(mor_imm_or.t$p.value, .001)`.
+
+Finally, the immoral events were more immoral  ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="morality"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="morality"]), digits=2)`) than they were socially unacceptable  ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="acceptibility"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="immoral" & d.means3$subjectGroup=="acceptibility"]), digits=2)`),  $t$(`r round(mor_acc_imm.t$parameter, digits=2)`) = `r round(mor_acc_imm.t$statistic, digits=2)`, $p$ = `r round(max(mor_acc_imm.t$p.value, 0.001) , digits = 2)`, and the abnormal events were more socially unacceptable ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="acceptibility"]), digits=2)`)  than they were immoral ($M$ = `r round(mean(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="morality"]), digits=2)` , $SD$ = `r round(sd(d.means3$mean[d.means3$condition1=="abnormal" & d.means3$subjectGroup=="morality"]), digits=2)`), $t$(`r round(mor_acc_ab.t$parameter, digits=2)`) = `r round(mor_acc_ab.t$statistic, digits=2)`, $p$ < `r max(mor_acc_ab.t$p.value, 0.001)`.
+
+## Study 1 "Possibility Study"
+```{r data possibility, echo=FALSE}
+d<- read.csv("data/study1_possibility.csv", stringsAsFactors = F)
+```
+We collected a sample of `r length(unique(d$id))` participants ($M_{age}$ = `r round(mean(d$age,na.rm=T),digits=2)`; $SD_{age}$ = `r round(sd(d$age,na.rm=T),digits=2)`; `r table(d$sex)[[1]]` females) from Amazon Mechanical Turk ([www.mturk.com]( www.mturk.com)).
+
+```{r possibility cleaning, echo=FALSE, message=FALSE}
+#Cleaning the dataframe
+# Selecting relevant variables
+#d<- read.csv("data/study1_possibility.csv", stringsAsFactors = F)
+d <- d[d$condition1 != "na",]
+d <- d[d$response != "timeout",]
+d$condition1[d$condition1 == "flouting"] <- "abnormal"
+
+d$response <- factor(d$response, levels = c("f", "j"))
+d$response <- as.numeric(d$response) - 1
+
+## Cutting out respondents who were too fast
+
+d.exclude <- d %>% filter(RT < 6000) %>%
+  group_by(condition3,id) %>%
+  summarise(meanRT = mean(RT, na.rm = T),
+            sdRT = sd(RT, na.rm = T))
+
+fast.excluded <- d.exclude$id[d.exclude$condition3=="fast" & d.exclude$meanRT<800]
+slow.excluded <- d.exclude$id[d.exclude$condition3=="slow" & d.exclude$meanRT<1000]
+
+d <- d %>% filter( !(id %in% fast.excluded | id %in% slow.excluded)) %>%
+  filter( !(condition3=="slow" & RT < 1500)) %>%
+  filter( !(RT < 500))
+
+## Correcting trial number
+
+just_group1.0 <- d[d$subjectGroup == "1",]
+just_group1 <- just_group1.0 %>% group_by(target,trialNo) %>% summarize(n = length(trialNo))
+
+# If X and subject group 1 have the same target, they should also have the same trial number
+
+i = 1
+j = 1
+
+while (i <= length(d$trialNo)){
+  if (d$subjectGroup[i] != "1"){
+    while (j <= length(just_group1$target)){
+      if (d$target[i] == just_group1$target[j]){
+        d$trialNo[i] <- just_group1$trialNo[j]
+      }
+      j <- j + 1
+    }
+  }
+  i <- i + 1
+  j = 1
+}
+
+```
+###Procedure
+Subjects made judgements about the same 128 actions, labeling them either possible or
+impossible by pressing the corresponding key on their keyboard. Each subject judged four
+scenarios and their corresponding actions under time pressure (1.5 seconds) and judged the
+remaining four scenarios and their corresponding actions with no time pressure. In the slow
+trials, subjects were encouraged to reflect on their answers. The combination of scenarios
+represented in each fast and slow group were randomized using a Latin-square design. Subjects
+were randomly assigned to one of the eight conditions created by this randomization scheme.
+
+Trials for which the response time was too fast, trials that timed out, and trials with not
+applicable responses were excluded. The final dataset consisted of 15,991 trials. There were
+4157 abnormal trails, 4110 immoral trials, 3902 impossible trials, and 3822 ordinary trials,
+divided across 10,268 fast trials and 5723 slow trials.
+```{r possibility analysis, echo=FALSE, message=FALSE}
+#Analyzing Data
+## Summarized dataframe
+d.sum <- d %>% group_by(condition1,condition3,trialNo) %>% summarize(
+  N = length(response),
+  mean = mean(response, na.rm=TRUE),
+  sd = sd(response, na.rm=TRUE),
+  se = sd / sqrt(N))
+
+d.slow <- d %>% filter(condition3 == "slow") %>%
+  group_by(condition1) %>%
+  summarize(
+    mean = mean(response, na.rm = TRUE),
+    sd = sd(response, na.rm = TRUE)
+  )
+## Joint norming + possibility dataframe - wide
+
+d.sum2 <- d %>% group_by(trialNo, target, condition1, condition3) %>% 
+  summarise(
+    mean = mean(response, na.rm=TRUE),
+    sd = sd(response, na.rm=TRUE),
+    N = length(response),
+    se = sd / sqrt(N)
+  ) %>%
+  pivot_wider(names_from= condition3, values_from= c(mean,sd,N,se)) 
+
+norms <- read.csv("data/study1_normingMeans.csv", stringsAsFactors = F)
+d.norms <- full_join(d.sum2,norms,by="trialNo") # all event types
+
+d.norms <- mutate(d.norms, FminusS = mean_fast - mean_slow)
+## Joint norming + possibility dataframe - long
+
+d.sum3 <- d %>% group_by(trialNo, target, condition1, condition3) %>% 
+  summarise(
+    mean = mean(response, na.rm=TRUE),
+    sd = sd(response, na.rm=TRUE),
+    N = length(response),
+    se = sd / sqrt(N)
+  )
+
+
+d.norms3 <- full_join(d.sum3,norms,by=c("trialNo")) # all types
+d1p <-d1[!duplicated(d1$id),]
+d.means4 <- d1 %>% filter(response!=6) %>% 
+  group_by(condition1,subjectGroup, trialNo) %>%
+  summarize(N = length(response),
+            mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            se = sd / sqrt(N)
+  ) 
+
+
+d.norms4 <- full_join(d.sum3,d.means4,by="trialNo") # extra long
+```
+
+
+```{r possibility modeling, eval=FALSE, echo=FALSE, message=FALSE}
+## Modeling
+
+# Overall effect
+lm1.0 <- glmer(response ~ condition1 * condition3 + (1|id) + (1|condition2), data=d, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+saveRDS(lm1.0, "models/study1_possibility/lm1.0.RData")
+
+# Interaction: Significant interaction effect (chisq=204.58, df=3, p<2.2e-16)
+lm1.1 <- glmer(response ~ condition1 + condition3 + (1|id) + (1|condition2), data=d, family = "binomial",  control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+saveRDS(lm1.1, "models/study1_possibility/lm1.1.RData")
+#d1.int<-anova(lm1.0,lm1.1)
+
+# Main effect of deliberation: None (chisq=.024, df=1, p=.876)
+lm1.2 <- glmer(response ~ condition1 + (1|id) + (1|condition2), data=d, family = "binomial",  control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+saveRDS(lm1.2, "models/study1_possibility/lm1.2.RData")
+#d1.del<-anova(lm1.1,lm1.2)
+
+# Main effect of event-type: Yes (chisq==6225.7, df=3, p<2.2e-16)
+lm1.3 <- glmer(response ~ condition3 + (1|id) + (1|condition2), data=d, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+saveRDS(lm1.3, "models/study1_possibility/lm1.3.RData")
+#d1.evt<-anova(lm1.1,lm1.3)
+```
+
+
+```{r possibility effect, echo=FALSE, message=FALSE}
+#load saved models
+lm1.0 <- readRDS("models/study1_possibility/lm1.0.RData")
+lm1.1 <- readRDS("models/study1_possibility/lm1.1.RData")
+lm1.2 <- readRDS("models/study1_possibility/lm1.2.RData")
+lm1.3 <- readRDS("models/study1_possibility/lm1.3.RData")
+
+#Interaction effect
+d1.int<-anova(lm1.0,lm1.1)
+
+#Main effect of deliberation
+d1.del<-anova(lm1.1,lm1.2)
+
+#Main effect of event-type
+d1.evt<-anova(lm1.1,lm1.3)
+
+
+# Effect of deliberation for each event type (also evident in fig2a)
+#       Ordinary: Main effect (z=-6.591, p<2e-16)
+sum.1<-summary(glmer(response ~ condition3 + (1|id) + (1|condition2), data=d[d$condition1=="ordinary",], family = "binomial"))
+#       Abnormal: No main effect (z=0.495, p<0.621)
+sum.2<-summary(glmer(response ~ condition3 + (1|id) + (1|condition2), data=d[d$condition1=="abnormal",], family = "binomial"))
+#       Impossible: Main effect (z=10.82, p<2e-16)
+sum.3<-summary(glmer(response ~ condition3 + (1|id) + (1|condition2), data=d[d$condition1=="impossible",], family = "binomial"))
+#       Immoral: Main effect (z=-5.621, p=1.9e-08)
+sum.4<-summary(glmer(response ~ condition3 + (1|id) + (1|condition2), data=d[d$condition1=="immoral",], family = "binomial"))
+
+d.1.3 <- d %>% group_by(condition1,condition3) %>%
+  summarize(
+    possibility = mean(response)
+  )
+
+```
+### Results
+A generalized linear mixed model was used to understand how subjects' possibility=
+assessments were affected by Event Type (immoral, impossible, ordinary, or abnormal) and
+Deliberation. The significance of an effect was computed by using an ANOVA to compare a
+model that included the factor of interest to a model that did not include that factor but was
+otherwise identical. These models included random intercepts for both participants and
+scenarios. 
+
+There was no significant main effect of Event Type ($\chi^2$(`r d1.evt$Df[2]`) = `r round(d1.evt$Chisq[2], digits = 1)`, $p$ < `r max(d1.evt$'Pr(>Chisq)'[2], .001)`) or
+Deliberation ($\chi^2$(`r d1.del$Df[2]`) = `r round(d1.evt$Chisq[2], digits = 1)`, $p$ = `r round(d1.del$'Pr(>Chisq)'[2], digits=3)`), though there was a significant interaction between
+Deliberation and Event Type ($\chi^2$(`r d1.int$Df[2]`) = `r round(d1.int$Chisq[2], digits = 1)`, $p$ < `r max(d1.int$'Pr(>Chisq)'[2], .001)`). Figure 3 presents the spread of
+impossibility ratings for each Event Type under the speeded and reflective conditions. 
+
+To further explore the relationship between Event Type and Deliberation, a series of
+generalized linear mixed models were used to predict the effect of Deliberation on possibility
+judgments for each Event Type in isolation. An ANOVA test revealed no significant main
+effect of Deliberation for abnormal events ($z$ = `r sum.2$coefficients[2,3] `, $p$ = `r sum.2$coefficients[2,4] `), though it did reveal a significant
+main effect of Deliberation for immoral events ($z$ = `r sum.4$coefficients[2,3]`, $p$ < `r max(sum.4$coefficients[2,4], .001)`), impossible events ($z$ = `r sum.3$coefficients[2,3]`, $p$ < `r max(sum.3$coefficients[2,4], .001)`), and ordinary events ($z$ = `r sum.1$coefficients[2,3]` , $p$ < `r max(sum.1$coefficients[2,4], .001)`). Because judgments for impossible
+events and ordinary events fall so close to the ends of the possibility spectrum, it is likely that
+their respective interactions with Deliberation are attributable to a regression to the mean. 
+
+Finally, it is noteworthy that, even given time to reflect, the average impossibility rating
+for abnormal events ($M$ = `r round(mean(d$response[d$condition1=="abnormal" & d$condition3=="slow"], na.rm=T), digits=2)` , $SD$ = `r round(sd(d$response[d$condition1=="abnormal"& d$condition3=="slow"], na.rm=T), digits=2)`) and immoral events ($M$ = `r round(mean(d$response[d$condition1=="immoral" & d$condition3=="slow"], na.rm=T), digits=2)` , $SD$ = `r round(sd(d$response[d$condition1=="immoral" & d$condition3=="slow"], na.rm=T), digits=2)`) was far above
+the impossibility ratings for ordinary events ($M$ = `r round(mean(d$response[d$condition1=="ordinary" & d$condition3=="slow"], na.rm=T), digits=2)` , $SD$ = `r round(sd(d$response[d$condition1=="ordinary" & d$condition3=="slow"], na.rm=T), digits=2)`).
+

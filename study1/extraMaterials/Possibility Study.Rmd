@@ -1,0 +1,191 @@
+---
+title: "Conventional Possibility"
+author: "Jonathan Phillips & Maeen Arslan"
+date: "November 2020"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+csl: apa.csl
+word_document: default
+---
+  
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE,dpi=300,fig.width=7)
+
+#rm(list=ls())
+
+blackGreyPalette <- c("#2C3539", "#999999") 
+library(tidyverse)
+library(lme4)
+library(knitr)
+library(grid)
+
+```
+
+## Study 1 "Possibility Study"
+```{r data study 1, echo=FALSE}
+d<- read.csv("data/study1_possibility.csv", stringsAsFactors = F)
+```
+
+We collected a sample of `r length(unique(d$id))` participants ($M_{age}$ = `r round(mean(d$age,na.rm=T),digits=2)`; $SD_{age}$ = `r round(sd(d$age,na.rm=T),digits=2)`; `r table(d$sex)[[1]]` females) from Amazon Mechanical Turk ([www.mturk.com]( www.mturk.com)).
+
+
+
+
+```{r norming cleaning, echo=FALSE, message=FALSE}
+#Cleaning the dataframe
+# Selecting relevant variables
+d <- d[d$condition1 != "na",]
+d <- d[d$response != "timeout",]
+d$condition1[d$condition1 == "flouting"] <- "abnormal"
+
+d$response <- factor(d$response, levels = c("f", "j"))
+d$response <- as.numeric(d$response) - 1
+
+## Cutting out respondents who were too fast
+
+d.exclude <- d %>% filter(RT < 6000) %>%
+  group_by(condition3,id) %>%
+  summarise(meanRT = mean(RT, na.rm = T),
+            sdRT = sd(RT, na.rm = T))
+
+fast.excluded <- d.exclude$id[d.exclude$condition3=="fast" & d.exclude$meanRT<800]
+slow.excluded <- d.exclude$id[d.exclude$condition3=="slow" & d.exclude$meanRT<1000]
+
+d <- d %>% filter( !(id %in% fast.excluded | id %in% slow.excluded)) %>%
+  filter( !(condition3=="slow" & RT < 1500)) %>%
+  filter( !(RT < 500))
+
+## Correcting trial number
+
+just_group1.0 <- d[d$subjectGroup == "1",]
+just_group1 <- just_group1.0 %>% group_by(target,trialNo) %>% summarize(n = length(trialNo))
+
+# If X and subject group 1 have the same target, they should also have the same trial number
+
+i = 1
+j = 1
+
+while (i <= length(d$trialNo)){
+  if (d$subjectGroup[i] != "1"){
+    while (j <= length(just_group1$target)){
+      if (d$target[i] == just_group1$target[j]){
+        d$trialNo[i] <- just_group1$trialNo[j]
+      }
+      j <- j + 1
+    }
+  }
+  i <- i + 1
+  j = 1
+}
+
+```
+
+
+
+### Procedure
+
+Subjects made judgements about the same 128 actions, labeling them either possible or
+impossible by pressing the corresponding key on their keyboard. Each subject judged four
+scenarios and their corresponding actions under time pressure (1.5 seconds) and judged the
+remaining four scenarios and their corresponding actions with no time pressure. In the slow
+trials, subjects were encouraged to reflect on their answers. The combination of scenarios
+represented in each fast and slow group were randomized using a Latin-square design. Subjects
+were randomly assigned to one of the eight conditions created by this randomization scheme.
+
+Trials for which the response time was too fast, trials that timed out, and trials with not
+applicable responses were excluded. The final dataset consisted of 15,991 trials. There were
+4157 abnormal trails, 4110 immoral trials, 3902 impossible trials, and 3822 ordinary trials,
+divided across 10,268 fast trials and 5723 slow trials.
+
+```{r analysis, echo=FALSE, message=FALSE}
+#Analyzing Data
+## Summarized dataframe
+d.sum <- d %>% group_by(condition1,condition3,trialNo) %>% summarize(
+  N = length(response),
+  mean = mean(response, na.rm=TRUE),
+  sd = sd(response, na.rm=TRUE),
+  se = sd / sqrt(N))
+
+d.slow <- d %>% filter(condition3 == "slow") %>%
+  group_by(condition1) %>%
+  summarize(
+    mean = mean(response, na.rm = TRUE),
+    sd = sd(response, na.rm = TRUE)
+  )
+## Joint norming + possibility dataframe - wide
+
+d.sum2 <- d %>% group_by(trialNo, target, condition1, condition3) %>% 
+  summarise(
+    mean = mean(response, na.rm=TRUE),
+    sd = sd(response, na.rm=TRUE),
+    N = length(response),
+    se = sd / sqrt(N)
+  ) %>%
+  pivot_wider(names_from= condition3, values_from= c(mean,sd,N,se)) 
+
+norms <- read.csv("data/normingmeans3.csv", stringsAsFactors = F)
+d.norms <- full_join(d.sum2,norms,by="trialNo") # all event types
+
+d.norms <- mutate(d.norms, FminusS = mean_fast - mean_slow)
+#write.csv(d.norms,file="possibilityAnalysis.csv")
+## Joint norming + possibility dataframe - long
+
+d.sum3 <- d %>% group_by(trialNo, target, condition1, condition3) %>% 
+  summarise(
+    mean = mean(response, na.rm=TRUE),
+    sd = sd(response, na.rm=TRUE),
+    N = length(response),
+    se = sd / sqrt(N)
+  )
+
+d.norms3 <- full_join(d.sum3,norms,by=c("trialNo")) # all types
+write.csv(d.norms3, file="study1and2.csv")
+d1 <- read.csv("Convention Data Files/Pilot_results4.csv",stringsAsFactors = F) #needed for end variable of d.norms4
+d1p <-d1[!duplicated(d1$id),]
+d.means4 <- d1 %>% filter(response!=6) %>% 
+  group_by(condition1,subjectGroup, trialNo) %>%
+  summarize(N = length(response),
+            mean = mean(response, na.rm = T),
+            sd = sd(response, na.rm =T),
+            se = sd / sqrt(N)
+  ) 
+
+
+d.norms4 <- full_join(d.sum3,d.means4,by="trialNo") # extra long
+## Modeling
+
+# Overall effect
+lm1.0 <- glmer(response ~ condition1 * condition3 + (1|id) + (1|condition2), data=d, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+summary(lm1.0)
+
+# Interaction: Significant interaction effect (chisq=204.58, df=3, p<2.2e-16)
+lm1.1 <- glmer(response ~ condition1 + condition3 + (1|id) + (1|condition2), data=d, family = "binomial",  control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+anova(lm1.0,lm1.1)
+
+# Main effect of deliberation: None (chisq=.024, df=1, p=.876)
+lm1.2 <- glmer(response ~ condition1 + (1|id) + (1|condition2), data=d, family = "binomial",  control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+anova(lm1.1,lm1.2)
+
+# Main effect of event-type: Yes (chisq==6225.7, df=3, p<2.2e-16)
+lm1.3 <- glmer(response ~ condition3 + (1|id) + (1|condition2), data=d, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+anova(lm1.1,lm1.3)
+
+# Effect of deliberation for each event type (also evident in fig2a)
+#       Ordinary: Main effect (z=-6.591, p<2e-16)
+summary(glmer(response ~ condition3 + (1|id) + (1|condition2), data=d[d$condition1=="ordinary",], family = "binomial"))
+#       Abnormal: No main effect (z=0.495, p<0.621)
+summary(glmer(response ~ condition3 + (1|id) + (1|condition2), data=d[d$condition1=="abnormal",], family = "binomial"))
+#       Impossible: Main effect (z=10.82, p<2e-16)
+summary(glmer(response ~ condition3 + (1|id) + (1|condition2), data=d[d$condition1=="impossible",], family = "binomial"))
+#       Immoral: Main effect (z=-5.621, p=1.9e-08)
+summary(glmer(response ~ condition3 + (1|id) + (1|condition2), data=d[d$condition1=="immoral",], family = "binomial"))
+
+d.1.3 <- d %>% group_by(condition1,condition3) %>%
+  summarize(
+    possibility = mean(response)
+  )
+```
+### Results

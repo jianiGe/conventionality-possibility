@@ -1,0 +1,459 @@
+---
+title: "Possibility generation"
+author: "Jiani Ge"
+date: "February 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(lme4)
+library(optimx)
+#install.packages("RColorBrewer")
+library("RColorBrewer")
+palette(brewer.pal(n=9,name="PuBu"))
+library(effects)
+library(emmeans)
+```
+
+
+```{r generation data, echo=FALSE}
+Full_results <- read.csv("data/Possibility generation.csv")
+Full_results_p <- Full_results[!duplicated(Full_results$ResponseId),]
+
+```
+
+
+```{r generation cleaning, eval=FALSE, echo=FALSE}
+# data cleaning
+# Select relevant variables
+clicks <- grep("Click", names(Full_results))
+data <- Full_results[-c(1,2),-c(1:6,8:12,clicks)]
+#data <- as.table(data)
+#View(data)
+
+ld <- data %>% gather(variable, value, -ResponseId, na.rm = TRUE) %>% 
+  mutate(scenario = case_when(
+    str_detect(variable,"X1") ~ "scenario1",
+    str_detect(variable,"X2") ~ "scenario2",
+    str_detect(variable,"X3") ~ "scenario3",
+    str_detect(variable,"X4") ~ "scenario4",
+    str_detect(variable,"X5") ~ "scenario5",
+    str_detect(variable,"X6") ~ "scenario6",
+    str_detect(variable,"X7") ~ "scenario7",
+    str_detect(variable,"X8") ~ "scenario8"
+  ), answerOrder = case_when(
+    str_detect(variable, "q1") ~ "1",
+    str_detect(variable, "q2") ~ "2",
+    str_detect(variable, "q3") ~ "3",
+    str_detect(variable, "q4") ~ "4",
+    str_detect(variable, "q5") ~ "5",
+    str_detect(variable, "q6") ~ "6",
+    str_detect(variable, "q7") ~ "7",
+    str_detect(variable, "q8") ~ "8",
+    str_detect(variable, "ratings1") ~ "1",
+    str_detect(variable, "ratings2") ~ "2",
+    str_detect(variable, "ratings3") ~ "3",
+    str_detect(variable, "ratings4") ~ "4",
+    str_detect(variable, "ratings5") ~ "5",
+    str_detect(variable, "ratings6") ~ "6",
+    str_detect(variable, "ratings7") ~ "7",
+    str_detect(variable, "ratings8") ~ "8"
+  ), time = case_when(
+    str_detect(variable, "Submit") ~ "time", 
+    TRUE ~ "question"
+  ), questionType = case_when(
+    str_detect(variable, "Norm") ~ "normality",
+    str_detect(variable, "Moral") ~ "morality",
+    str_detect(variable, "hood") ~ "probability",
+    str_detect(variable, "Rational") ~ "rationality",
+    time == "time" ~ "time",
+    TRUE ~ "question"
+  )) %>%
+  filter(!is.na(answerOrder)) %>%
+  filter(value != "") %>%
+  select(-c(variable,time))
+#  filter(ResponseId != "R_3D704c1SnkF7le4")
+
+wd <- ld %>% spread(questionType, value)
+
+#write.csv(wd, file="data/generationFull.csv",row.names = FALSE)
+
+# Exclude non-answers 
+wd_clean <- wd_clean[wd_clean$exclude != 1,]
+
+
+```
+
+```{r generation cleaning 2, echo=FALSE}
+wd_clean <- read.csv("data/generationFull_clean.csv")
+
+# Assign numbers to ratings, with "strongly agree" being a 7 (very moral, etc.) 
+# and "strongly disagree" being a 1 (very immoral, etc.)
+
+wd_clean$morality <- factor(wd_clean$morality, levels=c("Strongly Agree",
+                            "Agree","Somewhat Agree","Neutral","Somewhat Disagree",
+                            "Disagree","Strongly Disagree"),
+                            labels=c("7","6","5","4","3","2","1"))
+wd_clean$morality <- as.numeric(wd_clean$morality)
+
+wd_clean$normality <- factor(wd_clean$normality, levels=c("Strongly Agree",
+                             "Agree","Somewhat Agree", "Neutral","Somewhat Disagree", "Disagree","Strongly Disagree"),
+                            labels=c("7","6","5","4","3","2","1"))
+wd_clean$normality <- as.numeric(wd_clean$normality)
+
+wd_clean$probability <- factor(wd_clean$probability, levels=c("Strongly Agree",
+                               "Agree","Somewhat Agree","Neutral", "Somewhat Disagree","Disagree","Strongly Disagree"),
+                              labels=c("7","6","5","4","3","2","1"))
+wd_clean$probability <- as.numeric(wd_clean$probability)
+
+wd_clean$rationality <- factor(wd_clean$rationality, levels=c("Strongly Agree",
+                               "Agree","Somewhat Agree","Neutral","Somewhat Disagree","Disagree", "Strongly Disagree"),
+                              labels=c("7","6","5","4","3","2","1"))
+wd_clean$rationality <- as.numeric(wd_clean$rationality)
+
+ld_clean <- pivot_longer(wd_clean,cols=c(morality,normality,probability,rationality), names_to="judgement")
+
+
+```
+### Procedure
+
+We collected a sample of `r length(unique(Full_results_p$ResponseId))` participants from Amazon Mechanical Turk ([www.mturk.com]( www.mturk.com)).
+
+In an online survey, participants read 4 scenarios randomly selected from a set of 8. Each scenario consists of a one to two-sentence description of a common place situation. For example, one scenario reads: “You are eating dinner at a buffet-style restaurant, in which you pay upfront for your meal and fill your plate from serving platters.” Participants are first asked to write down 8 things that they could do in each situation, generating 32 actions in total. Then, they are asked to rate each of the actions they generated on a scale of 1 to 7, in terms of morality, acceptability, probability, and rationality. 
+
+After excluding non-answers, the dataset consists of 3242 generated actions and 12972 ratings.
+
+
+### Results
+1\. Before we explore any relationship between the variables, histograms of the participants' ratings of the actions they generated show that, overall, most of the actions they generated are highly moral, normal, probable, and rational. 
+This could suggest that in open-ended possibility generation, people tend to come up with possible actions that are moral, normal, probable, and rational.
+
+```{r generation summary plot 0, echo=FALSE, message=FALSE}
+#histogram of ratings
+#ggplot(df, aes(x=weight)) + geom_histogram()
+
+fig0a <- ggplot(ld_clean, aes(x=value)) +
+  geom_histogram(binwidth = 1) +
+  facet_grid(~judgement)
+
+print(fig0a)
+```
+
+2\. While the generated possible actions are overall highly moral, probable, rational, and normal, there are several factors that could affect the ratings. We first looked at the relationship between a possible action's ratings and its position in the series of actions that the participants generate for the scenario (answer order). As the barplot below shows, ratings for each criterion decrease from earlier answers to later ones. 
+
+A comparison between linear mixed-effects models shows that there are significant main effects of answer order (chisq(3)=935.15,p<2.2e-16) and judgment type (chisq(7)=331.18, p<2.2e-16) on ratings, as well as an interaction between answer order and judgment type (chisq(21)=76.472, p=8.924e-07). Post hoc analysis shows that the ratings for the first answer is significantly higher than the second one; there is no significant difference between other adjacent answers. Morality ratings are overall higher than normality and rationality ratings, which are higher than probability ratings. 
+
+Overall, earlier answers tend to be rated as more moral, probable, rational, and normal. This is consistent with the hypothesis that these "values" constrain people's representation of possible actions and that the less people deliberate, the stronger the effect of the constraints. 
+
+
+```{r generation summary plot1, echo=FALSE, message=FALSE}
+
+ld.means <- ld_clean %>% 
+  group_by(answerOrder,judgement) %>%
+  summarize(mean = mean(value, na.rm = T),
+            sd = sd(value, na.rm =T),
+            N = length(value),
+            se = sd / sqrt(N))
+ld.means$answerOrder <- as.character(ld.means$answerOrder)
+
+# Figure 1a: Average rating X answer order by rating criteria
+fig1a <- ggplot(ld.means, aes(x=answerOrder, y=mean, fill=answerOrder)) +
+  geom_bar(position="dodge", stat="identity")  +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, alpha=1, position= position_dodge(.9)) +
+  facet_grid(~judgement) +
+  labs(title="") +
+  coord_cartesian(ylim=c(1,7)) +
+  ylab("Average rating") +
+  xlab("") +
+  theme(
+    panel.background = element_rect(fill="white",color="black")
+    ,panel.grid.major = element_blank()
+    ,panel.grid.minor = element_blank()
+    ,legend.title=element_blank()
+    ,legend.position=("bottom")
+    ,legend.text=element_text(size=14)
+    ,axis.text.y=element_text(size=14)
+    ,axis.text.x=element_blank()
+    ,axis.title.y=element_text(size=16)
+    ,axis.ticks = element_blank()
+    ,strip.text=element_text(size=16)
+    ,axis.title=element_text(size=12)   
+  )
+
+print(fig1a)
+
+
+#Figure 1aa: Average rating X answer order
+fig1aa <- ggplot(ld.means, aes(x=answerOrder, y=mean, fill=answerOrder)) +
+  geom_bar(position="dodge", stat="identity")
+#print(fig1aa)
+
+
+#Figure 1ab and Figure 1ac: distribution of rating value (low/med/high) X answer order
+ld_value_count <- ld_clean %>%
+  group_by(answerOrder, judgement, value) %>%
+  summarise(count = n()) %>%
+  na.omit() %>%
+  mutate(value2 = case_when(value < 4 ~ '0_low',
+                            value == 4 ~ '1_med',
+                            value > 4 ~ '2_high'))
+
+#fig1ab <- ggplot(ld_value_count, aes(x = answerOrder, y = count, fill = value2)) +
+#  geom_bar(position = "stack", stat = "identity")
+#print(fig1ab)
+
+#fig1ac <- ggplot(ld_value_count, aes(x = answerOrder, y = count, fill = value2)) +
+#  geom_bar(position = "stack", stat = "identity") +
+#  facet_grid(~judgement)
+#print(fig1ac)
+
+#Figure 1ad and Figure 1ae: distribution of rating value (1-7) X answer order
+ld_value_count$value <- as.character(ld_value_count$value)
+fig1ad <- ggplot(ld_value_count, aes(x = answerOrder, y = count, fill = value)) +
+  geom_bar(position = "stack", stat = "identity")
+print(fig1ad)
+
+fig1ae <- ggplot(ld_value_count, aes(x = answerOrder, y = count, fill = value)) +
+  geom_bar(position = "stack", stat = "identity") +
+  facet_grid(~judgement)
+print(fig1ae)
+
+
+
+```
+
+```{r generation analysis 1, eval= FALSE, echo=FALSE, message=FALSE}
+#effect of answer order and judgement type on rating
+
+ld_clean$answerOrder <- as.character(ld_clean$answerOrder)
+
+lmer0 <- lmer(value ~ answerOrder * judgement + (1|ResponseId) + (1|scenario), data=ld_clean)
+lmer1 <- lmer(value ~ answerOrder + judgement + (1|ResponseId) + (1|scenario), data=ld_clean)
+lmer2 <- lmer(value ~ answerOrder + (1|ResponseId) + (1|scenario), data=ld_clean)
+lmer3 <-lmer(value ~ judgement + (1|ResponseId) + (1|scenario), data=ld_clean)
+
+#ANOVA: significant main effects of answer order and judgement type, significant interaction
+#interaction, chisq(21)=76.472, p=8.924e-07***
+anova(lmer0, lmer1)
+#main effect of judgement type, chisq(3)=935.15,p<2.2e-16***
+anova(lmer1, lmer2)
+#main effect of answer order, chisq(7)=331.18, p<2.2e-16***
+anova(lmer1, lmer3)
+
+#post hoc
+#by answer order: significant difference between 1st and 2nd answer, but not other adjacent answers
+posthoc1 = emmeans(lmer0, ~ answerOrder)
+pairs(posthoc1)
+
+#by judgement type: no significant difference between average rating of normality and rationality judgements, all others are different
+posthoc2 = emmeans(lmer0, ~ judgement)
+pairs(posthoc2)
+
+#
+#distribution of rating by answerOrder
+ld_clean <- ld_clean %>% mutate(value2 = case_when(value < 4 ~ 'low',
+                            value == 4 ~ 'med',
+                            value > 4 ~ 'high'))
+table0 <- table(ld_clean$answerOrder,ld_clean$value2)
+table0
+chisq.test(table0)
+#X-squared = 231.49, df = 14, p-value < 2.2e-16
+
+
+```
+
+3\. To confirm that answer order indicates deliberation, we looked at the relationship between answer order and the time spent on generating the answer. A comparison between linear mixed-effects models shows that there is a significant main effect of answer order (chisq(7)=127.23, p<2.2e-16). Earlier answers are generated faster than later ones.
+
+There is also a significant main effect of rating on time to answer (chisq(1)=8.5486, p=0.003458). More highly rated answers are generated faster - consistent with the previous analysis.
+
+```{r generation summary plot2, echo=FALSE, message=FALSE}
+#answer order x time to answer
+ld.time <- ld_clean %>% 
+  group_by(answerOrder, judgement) %>%
+  summarize(mean = mean(time, na.rm = T),
+            sd = sd(time, na.rm =T),
+            N = length(time),
+            se = sd / sqrt(N))
+
+ld.rating <- ld_clean %>%
+  group_by(value) %>%
+  summarize(mean = mean(time, na.rm = T),
+            sd = sd(time, na.rm =T),
+            N = length(time),
+            se = sd / sqrt(N)) 
+
+
+fig1b <- ggplot(ld.time, aes(x=answerOrder, y=mean)) +
+  geom_bar(position="dodge", stat="identity", fill="#808080")  +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, alpha=1, position= position_dodge(0.9)) +
+  ylab("Time to answer (s)")
+print(fig1b)
+
+fig1c <-ggplot(ld.rating, aes(x=value, y=mean)) +
+  geom_bar(position="dodge", stat="identity") +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, alpha=1, position= position_dodge(0.9)) +
+  ylab("Time to answer (s)")
+print(fig1c)
+
+```
+
+```{r generation analysis 2, eval=FALSE, echo=FALSE, message=FALSE}
+ld_clean_1 <- na.omit(ld_clean)
+
+ld_clean_1$answerOrder <- as.character(ld_clean_1$answerOrder)
+
+#effect of answer order and rating on time to answer
+lmer4 <- lmer(time ~ answerOrder * value + (1|ResponseId) + (1|scenario), data=ld_clean_1)
+lmer5 <- lmer(time ~ answerOrder + value + (1|ResponseId) + (1|scenario), data=ld_clean_1)
+lmer6 <- lmer(time ~ answerOrder + (1|ResponseId) + (1|scenario), data=ld_clean_1)
+lmer7 <- lmer(time ~ value + (1|ResponseId) + (1|scenario), data=ld_clean_1)
+
+#interaction, not significant, chisq(7)=8.4552, p=0.2942
+anova(lmer4, lmer5)
+#main effect of rating, chisq(1)=8.5486, p=0.003458
+anova(lmer5, lmer6)
+#main effect of answer order, chisq(7)=127.23, p<2.2e-16
+anova(lmer5, lmer7)
+
+#post hoc
+posthoc2_1 = emmeans(lmer4, ~ answerOrder)
+pairs(posthoc2_1)
+#no significance difference between first 3 answers, but also between 1 and 7, and...
+
+```
+
+4\. We hypthesize that in addition to the above-examined values (morality, rationality, probability, normality), the extent to which the generated action is specific to the scenario also differs across the generation/deliberation process. We coded the generated actions into binary categories based on whether they are explicitly related to the scenario or not. The barplots below suggest that, overall, earlier answers are more likely to be explicitly related to the scenario. A comparison between generalized linear mixed model confirmed that the effect is significant (chisq(7)=378.71, p<2.2e-16). 
+
+There are considerable variations of the overall "relevance" of the answers across the scenarios, but the effect of answer order on relevance is consistent. 
+
+
+```{r generation summary plot 4, echo=FALSE, message=FALSE}
+#analysis below incorporates results from coding
+Coded_results <- read.csv("data/Coding poss gen data - Data.csv")
+df0 <- Coded_results[c(1:4,8)] %>% 
+  rename(c("related" = "SCEN..final."))
+df0 <- df0[df0$related == "Y"|df0$related == "N",]
+
+df1 <- df0 %>%
+  group_by(answerOrder, scenario, related) %>%
+  summarise(count = n())
+
+
+fig2a <- ggplot(df1, aes(x = answerOrder, y = count, fill = related)) +
+  geom_bar(position = "fill", stat = "identity")
+print(fig2a)
+
+fig2b <- ggplot(df1, aes(x = answerOrder, y = count, fill = related)) +
+  geom_bar(position = "fill", stat = "identity") +
+  facet_grid(~scenario)
+print(fig2b)
+
+#the plots suggest that earlier answers are more explicitly relevant to the scenario than later answers. However, there also seem to be significant variation between scenarios.
+
+```
+
+
+```{r generation analysis 3, eval=FALSE, echo=FALSE, message=FALSE}
+#effect of answer order on the relevance of the answer to the scenario
+df0$related <- as.factor(df0$related)
+
+glmer1.0 <- glmer(related ~ answerOrder * scenario + (1|ResponseId), data=df0, family = "binomial")
+
+glmer1.1 <- glmer(related ~ answerOrder + (1|ResponseId), data=df0, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+
+glmer1.2 <- glmer(related ~ scenario + (1|ResponseId), data=df0, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+
+glmer1.3 <- glmer(related ~ answerOrder + scenario + (1|ResponseId), data=df0, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+
+glmer1.4 <- glmer(related ~ 1 + (1|ResponseId), data=df0, family = "binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+
+anova(glmer1.3, glmer1.1) #chisq=381.15  7  p< 2.2e-16
+anova(glmer1.3, glmer1.2) #chisq=102.08  7  p< 2.2e-16
+#anova(glmer1.0, glmer1.3) #p=0.0009981
+
+anova(glmer1.4, glmer1.1) #chisq=89.322  7  p< 2.2e-16
+anova(glmer1.4, glmer1.2) #chisq=368.39  7  p< 2.2e-16
+```
+
+5\. We also coded the generated actions into binary categories based on whether they violate the conventions related to the scenarios. The barplots below show that there is overall an increase of unconventional actions (or decrease of conventionality) from ealier to later answers. A comparion between generalized linear mixed models show that the effect is significant (chisq(1)=5.532, p=0.01867). 
+
+There is significant variation between the scenarios. Interestingly, people generated much more unconventional actions for scenario 7 than others. My speculation is that scenario 7 is the only scenario in which the participant would be aloone in the situation, unobserved by other people. Whether people are being observed could be a factor affecting how likely they conform to the convention.
+
+```{r generation summary plot 5, echo=FALSE, message=FALSE}
+df2 <- Coded_results[c(1:4,22)] %>%
+  rename(c("unconventional" = "ConventionalViolation.1"))
+df2 <- df2[df2$unconventional =="Y"|df2$unconventional == "N",]
+df3 <- df2 %>%
+  group_by(answerOrder, scenario, unconventional) %>%
+  summarise(count = n())
+
+fig3a <- ggplot(df3, aes(x = answerOrder, y = count, fill = unconventional)) +
+  geom_bar(position = position_fill(reverse = TRUE), stat = "identity") 
+print(fig3a)
+
+fig3b <- ggplot(df3, aes(x = answerOrder, y = count, fill = unconventional)) +
+  geom_bar(position = position_fill(reverse = TRUE), stat = "identity") +
+  facet_grid(~scenario)
+print(fig3b)
+
+
+```
+
+```{r generation analysis 4, eval=FALSE, echo=FALSE, message=FALSE}
+#effect of answer order on conventionality
+df2$unconventional <- as.factor(df2$unconventional)
+
+glmer2.0 <- glmer(unconventional ~ answerOrder + (answerOrder|ResponseId) +(1|scenario), data = df2, family="binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+
+glmer2.1 <- glmer(unconventional ~ 1 + (answerOrder|ResponseId) +(1|scenario), data = df2, family="binomial", control = glmerControl(optimizer = c("optimx"), optCtrl = list(method = "nlminb")))
+
+anova(glmer2.0, glmer2.1) #chisq(1)=5.532, p=0.01867 
+
+```
+
+6\. Here's an attempt to visualize conventionality and the participants' own morality and probability ratings in the same graph. 
+
+```{r generation analysis 5, echo=FALSE, message=FALSE}
+df4 <- Coded_results[c(1:4, 8, 22)] %>%
+  rename(c("unconventional" = "ConventionalViolation.1", "related" = "SCEN..final."))
+  #filter(related != "") %>%
+  #filter(unconventional != "")
+
+
+df_merged <- merge(df4, wd_clean, by.x="question", by.y="question", all.x=TRUE)
+df_merged <- df_merged %>%
+  filter(ResponseId.x == ResponseId.y) %>%
+  filter(scenario.x == scenario.y) %>%
+  filter(answerOrder.x == answerOrder.y) %>%
+  select(c(1:6, 10:14),) %>%
+  select(c(2, 4, 3, 1, 7:10, 5:6, 11))
+
+df5 <- df_merged %>%
+  select(c(1:5, 7, 10),) %>%
+  rename(c("conventionality" = "unconventional")) %>%
+  mutate(conventionality = case_when(conventionality == "N" ~ 7,
+                                        conventionality == "Y" ~ 1)) %>%
+  pivot_longer(cols=c(morality, probability, conventionality), names_to="type")
+
+df5$value <- as.factor(df5$value)
+
+df6 <- df5 %>%
+  group_by(answerOrder.x, type, value) %>%
+  summarise(count = n())
+
+
+fig4a <- ggplot(df6, aes(x = type, y = count, fill = value)) +
+  geom_bar(position = "stack", stat = "identity") +
+  scale_fill_brewer(palette="YlGnBu")
+print(fig4a)
+
+
+```
+
+
+
+
+
